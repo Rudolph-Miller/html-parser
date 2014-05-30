@@ -1,27 +1,22 @@
+(defpackage html
+  (:use :common-lisp)
+  (:export :get-tag
+		   :pic-cont
+		   :spec-in-tag-list
+		   :spec))
 
-(defmacro ncons (lst1 lst2)
-  `(setf ,lst2 (cons ,lst1 ,lst2)))
+(load "util")
 
-(defun split (key line)
-  (let ((result nil))
-	(declare (list result))
-	(loop
-	  for pos = (position key line)
-	  do (ncons (the string (subseq line 0 pos)) result)
-	  while pos
-	  do (setf line (subseq line (1+ pos))))
-	(nreverse result)))
- 
+(in-package html)
 
-(defmacro setappend (lst result)
-  `(setf ,result (cons ,lst ,result)))
-
+;;;str -> (list "<a>" tag-position )
 (defun get-tag (str)
+  (declare (string str))
   (let ((pos-< (position #\< str))
 		(pos-> (position #\> str)))
 	(if (and (not (null pos-<)) (not (null pos->)))
 	  (let ((tag (subseq str pos-< (1+ pos->))))
-		(list tag pos-< pos->)))))
+		(the list (list tag pos-< pos->))))))
 
 (defun tag-p (tag)
   (if (and (equal (subseq tag 0 1) "<") (equal (subseq tag (1- (length tag)) (length tag)) ">"))
@@ -31,43 +26,37 @@
   (if (equal (subseq tag 1 2) "/")
 	t nil))
 
-(defun br-p (tag)
-  (if (equal (subseq tag 1 3) "br")
+(defun content-p (txt)
+  (if (not (equal (subseq txt 0 1) "<"))
 	t nil))
 
-(defun doctype-p (tag)
-  (if (find "DOCTYPE" tag :test #'equal)
-	t nil))
-
+;;;str -> (tag list ..)
 (defun parse-tag (str)
   (let ((result nil))
   (loop
 	for tag = (get-tag str)
 	while tag
 	do (if (not (eql (cadr tag) 0))
-		 (progn (setappend (subseq str 0 (cadr tag)) result)
-				(setappend (car tag) result))
-		 (setappend (car tag) result))
+		 (progn (ncons (subseq str 0 (cadr tag)) result)
+				(ncons (car tag) result))
+		 (ncons (car tag) result))
 	do (setf str (subseq str (1+ (caddr tag)))))
   (nreverse result)))
 
-(defun content-p (txt)
-  (if (not (equal (subseq txt 0 1) "<"))
-	t nil))
-
-
+;;;input -> list
 (defun input->html->list (input)
   (with-open-file (f input :direction :input)
 	(let ((result nil))
-	  (loop
+  (loop
 		for line = (read-line f nil)
 		while line
 		do (setf result (concatenate 'list result (parse-tag line))))
 	  (remove-if #'null result))))
 
+
 (defun categorize (txt)
   (cond
-	((content-p txt) 'content)
+	((content-p txt) 'cont)
 	((tag-p txt)
 	 (cond 
 	   ((end-p txt) 'end)
@@ -77,6 +66,8 @@
 (defun remove-space (lst)
   (remove-if #'(lambda (item) (< (char-code (char item 0)) 33)) lst))
 
+;;;tag-countがnのときにconsみたいにすれば階層づけできる。
+;;;or end のときにtag-count -1 にconsするとか
 (defun parse (html-list)
   (let ((result nil)
 		(tag-count 0)
@@ -89,7 +80,7 @@
 		 ((eql tag 'beg)
 		  (setf tag-count (1+ tag-count)) 
 		  (push line (gethash tag-count acc)))
-		 ((eql tag 'content)
+		 ((eql tag 'cont)
 		  (push line (gethash tag-count acc)))
 		 ((eql tag 'end)
 		  (push line (gethash tag-count acc))
@@ -109,8 +100,8 @@
 				   (cadr tag-list)
 				   nil)))
 	(list (read-from-string (concatenate 'string ":" (car tag-content)))
-		  (list :tag-content (cdr tag-content))
-		  (list :content content))))
+		  (cons :tag-cont (cdr tag-content))
+		  (cons :cont content))))
 
 (defun get-a-tag (lst)
   (remove-if #'null (mapcar #'(lambda (item) (if (eq (car item) ':a)
@@ -121,13 +112,24 @@
   (mapcar #'caar (mapcar #'cdadr (get-a-tag lst))))
 
 (defun get-link (lst)
-  (mapcar #'(lambda (item) (subseq item 6 (1- (length item)))
+  (mapcar #'(lambda (item) (subseq item 6 (1- (length item))))
 		  (get-href lst)))
 
-;(print (parse (remove-space (parse-tag "<a href=\"http\">Tap</a> <script ></script>"))))
-(print (get-link (parse (input->html->list "../test/test1.html"))))
+;;;tag = :tag
+;;;input = file name
+(defun spec (tag input)
+  (let ((lst (parse (input->html->list input))))
+	(remove-if-not #'(lambda (lst) (eql (car lst) tag))
+				   lst)))
 
+(defun spec-in-tag-list (tag-list input)
+  (let ((lst (parse (input->html->list input))))
+		(remove-if-not #'(lambda (lst) (find (car lst) tag-list))
+					   lst)))
 
-
-
+(defun pic-cont (tag-list input)
+  (let ((lst (parse (input->html->list input))))
+	(apply #'concatenate 'string (mapcar #'(lambda (lst) (cdaddr lst))
+			(remove-if-not #'(lambda (lst) (find (car lst) tag-list))
+						   lst)))))
 
